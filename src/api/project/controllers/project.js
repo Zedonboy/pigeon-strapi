@@ -12,7 +12,7 @@ const crypto = require("crypto")
 function generateProject(rnd) {
   return `#pragma version 5
   byte "${rnd}"
-  txna ApplicationArgs 0
+  arg 0
   b==
   assert
   int 1
@@ -30,7 +30,8 @@ module.exports = createCoreController('api::project.project', ({ strapi }) => ({
       //TODO(USer must pay to create project.)
       let encoder = new TextEncoder()
       let rndBytes = crypto.randomBytes(32)
-      let projectTeal = generateProject(rndBytes.toString("hex"))
+      let code = rndBytes.toString("hex")
+      let projectTeal = generateProject(code)
       let client = getClient(net)
       let response = await client.compile(projectTeal).do()
       let projectAddr = response["hash"]
@@ -51,7 +52,7 @@ module.exports = createCoreController('api::project.project', ({ strapi }) => ({
         return;
       }
   
-      if (txn["amt"] < 100) {
+      if (txn["amt"] < 2*1000000) {
         ctx.throw(400, "Amount sent not allowed");
         return;
       }
@@ -65,11 +66,11 @@ module.exports = createCoreController('api::project.project', ({ strapi }) => ({
       let tranferTxn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
         from: creator_account.addr,
         to: projectAddr,
-        amount: 1000*5,
+        amount: 1000000*1,
         suggestedParams:params,
       })
 
-      st = tranferTxn.signTxn(creator_account.sk)
+      let st = tranferTxn.signTxn(creator_account.sk)
       await client.sendRawTransaction(st).do()
 
       let optinDao = algosdk.makeApplicationOptInTxnFromObject({
@@ -82,7 +83,8 @@ module.exports = createCoreController('api::project.project', ({ strapi }) => ({
         from: projectAddr,
         to: projectAddr,
         assetIndex: PARTICIPATION_ASSET_ID,
-        amount: 0
+        amount: 0,
+        suggestedParams:params
       })
 
       const app_args = [encoder.encode("register_project"), encoder.encode(lang)]
@@ -91,7 +93,7 @@ module.exports = createCoreController('api::project.project', ({ strapi }) => ({
       }
 
       if(github_issue){
-        app_args.push(algosdk.encodeUint64(github_issue))
+        app_args.push(encoder.encode(github_issue))
       }
 
       let sender = algosdk.encodeAddress(txn["snd"])
@@ -109,7 +111,9 @@ module.exports = createCoreController('api::project.project', ({ strapi }) => ({
       algosdk.assignGroupID(txnGroup)
 
       let program = new Uint8Array(Buffer.from(response["result"] , "base64"));
-      const lsig = new algosdk.LogicSigAccount(program, [encoder.encode(rndBytes.toString("hex"))])
+      const logic_args = []
+      logic_args.push(Buffer.from(code))
+      const lsig = new algosdk.LogicSigAccount(program, logic_args)
       let s_optintoken = algosdk.signLogicSigTransaction(optInToken, lsig)
       let s_optindao = algosdk.signLogicSigTransaction(optinDao, lsig)
       let s_appcall = algosdk.signLogicSigTransaction(appCall, lsig)
@@ -125,7 +129,7 @@ module.exports = createCoreController('api::project.project', ({ strapi }) => ({
         }
       })
       return {
-        passcode: rndBytes.toString("hex"),
+        passcode: code,
         project: projectEntity
       }
       //OptIn to DAO
